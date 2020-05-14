@@ -1,0 +1,98 @@
+
+# Read features table into dataframe
+df_features <- xap.read_table('my_features')
+
+####  BOOSTED DECISION TREE ##########
+#Splitting features into training and testing datasets 
+set.seed(51)
+train <- sample_frac(df_features, 0.8)
+train <- train[,-1]
+train_index <- as.numeric(rownames(train))
+test <- df_features[-train_index,-1 ]
+
+#Creating numeric vector of outcomes from training set 
+output = as.numeric(train$Duration)
+
+############ GRID SEARCH ###########
+
+#Portions of this code were taken from: http://uc-r.github.io/gbm_regression
+
+# grid <- expand.grid(
+# eta = c(0.1,0.5),
+# max_depth = c(3,6),
+# min_child_weight = c(5,20),
+# subsample = c(0.5,1),
+# nrounds = c(50,100),
+# min_RMSE = 0
+# )
+
+# for(i in 1:nrow(grid)) {
+  
+#   params <- list(
+#     eta = grid$eta[i],
+#     max_depth = grid$max_depth[i],
+#     min_child_weight = grid$min_child_weight[i],
+#     subsample = grid$subsample[i],
+#     nrounds = grid$nrounds[i]
+#   )
+#   set.seed(24)
+#   xgb.tune <- xgb.cv(
+#     paramss = params,
+#     data = as.matrix(train[-1]),
+#     label = output,
+#     nfold = 5,
+#     nrounds = 100,
+#     objective = "reg:linear",  
+# )  
+
+#   grid$min_RMSE[i] <- min(xgb.tune$evaluation_log$test_rmse_mean)
+# }
+
+# hyper_grid %>%
+#   dplyr::arrange(min_RMSE) %>%
+#   head(10)
+
+######## XGBOOST MODEL ###########
+
+dmatrix <- xgb.DMatrix(data = as.matrix(train[-1]), label = output)
+bst <- xgboost(data =dmatrix,max_depth = 6,eta =0.2,nthread = 1,nrounds = 120,min_child_weight = 18,subsample = 0.8)
+
+# #Cross validation
+xgb.fit <- xgb.cv(
+  data = as.matrix(train[-1]),
+  label = output,
+  nrounds = 120,
+  nfold = 5,
+  eta = 0.2,
+  max_depth = 6,
+  min_child_weight = 18,
+  subsample = 0.8,
+  prediction = TRUE,
+  objective = "reg:linear", 
+  verbose = 0               
+)
+
+
+# #Feature importance plot
+importance <- xgb.importance(model = bst)
+plt <- xgb.plot.importance(importance_matrix = importance
+    ,top_n = 10) 
+
+#Predictions
+pred <- (predict(bst, as.matrix(test[-1])))
+
+#accuracy score - percentage of predictions that were within a week of the actual value 
+score <- 0 
+for (i in 1:length(pred)) {
+    if (((pred[i] - test$Duration[i]) < 7) & ((pred[i] - test$Duration[i]) > -7)) {
+    score <- score + 1
+    }
+}
+accuracy <- (score/(length(pred))) * 100
+
+#rmse 
+rmse <- sqrt(mean((pred-test$Duration)^2))
+
+# Write out dataframes
+xap.db.writeframe(pred, 'predictions')
+xap.db.writeframe(test,'test')
