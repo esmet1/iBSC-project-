@@ -1,0 +1,88 @@
+# library(dbplyr)
+
+
+# ### Get relevant lab results
+# ## Get hospital mrns for relevant patients
+df_had <- as_tibble(xap.read_table('hospital_admissions'))
+# # Filter for ease of development
+df_had <- df_had %>%
+    rename_all(
+        funs(
+           stringr::str_replace(.,"rdv_gos_hospital_admissions_","")
+            )
+        )
+# # Add duration in days
+df_had <- df_had %>%
+    mutate(Duration = as.numeric(as.difftime(end_datetime - start_datetime))) %>%
+    mutate(Duration = Duration/(60*24))
+# # Filter by minimum a day duration
+df_had <- df_had %>% filter(Duration >= 2)
+
+# # Get relevant hospital numbers
+mrn_list <- df_had %>%
+    select(hospital_no) %>%
+    distinct()
+mrn_list <- mrn_list$hospital_no
+
+print("Loading LRE data ...")
+# Get lab results for those patients
+tbl_lre <- tbl(xap.conn, "lab_results")
+df_lre <- tbl_lre %>%
+    #getting lab results of sodium, rbc, neutrophils, urea and creatinine
+    filter(rdv_gos_lab_results_test_code %in% c("C0030", "H0010", "H0087", "C0005","C0025")) %>% 
+    filter(rdv_gos_lab_results_hospital_no %in% mrn_list) %>%
+    collect()
+ 
+df_lre <- df_lre %>%
+    rename_all(
+        funs(
+            stringr::str_replace(.,"rdv_gos_lab_results_","")
+            )
+        )
+
+df_lre <- df_lre %>%
+    mutate(result = as.numeric(result_text)) %>%
+    drop_na(result)
+
+df_lre <- df_lre %>%
+    select(
+        hospital_no,
+        lab_no,
+        collected,
+        test_name,
+        result
+    ) %>%
+    distinct()
+
+##/TODO: Convert result_text to result numeric, remove non-numeric values
+
+
+print('Joining LRE to HAD ...')
+# Join tests to admissions
+df_had_tests <- df_had %>%
+    left_join(df_lre, by=c('hospital_no'))
+
+print('Filtering by collected datetime ...')
+# filter by collected within admission
+df_had_tests <- df_had_tests %>%
+    filter(collected %within% interval(start_datetime, end_datetime))
+    
+df_had_tests <- df_had_tests %>%
+    mutate(time_to_test = as.numeric(interval(start_datetime, collected))/(24*3600)) %>% # fractions of 24 hours
+    mutate(day_of_test = as.integer(ceiling(time_to_test)))
+    
+#Filter by those collected on first day of admission
+df_had_tests <- df_had_tests %>%
+    filter(day_of_test==1)
+    
+df_had_summary <- df_had_tests %>%
+    group_by(event_id, test_name) %>%
+    summarise(
+        mean=mean(result),
+        min=min(result),
+        max=max(result),
+        sd=sd(result)
+    )
+
+
+xap.db.writeframe(df_had_summary, 'blood_test_results_et')
