@@ -1,0 +1,247 @@
+#Adding length of stay to hospital admissions
+df_had["Duration"] <- NA
+df_had$Duration <- as.numeric(as.difftime(df_had$end_datetime - df_had$start_datetime),units = "days")
+
+#Reading in table of patients who have lab results
+df_lab_tests <- xap.read_table("blood_test_results_et")
+
+###### PUTTING DATA INTO CORRECT FORMAT ###########
+
+#Taking sample of just patients who had lab tests done during their admission
+pt <- df_had %>% filter(event_id %in% df_lab_tests$event_id)
+
+#Join datasets and filter according to which diagnoses were made within a month of the hospital stay
+#(to account for diagnoses codes being put in after discharge)
+df_joined <- pt %>% left_join(df_dia,by = "hospital_no")
+df_filtered <- df_joined %>%
+    filter(start_datetime.y >= as.Date(start_datetime.x)) %>%
+    filter(start_datetime.y <= (as.Date(end_datetime.x) + 30))
+    
+#Getting the most common diagnosis codes
+common <-df_filtered %>%
+    group_by(df_filtered$diag_local_code) %>%
+    summarize(Count = n()) %>%
+    arrange(desc(Count))
+common <- common[1:100,]
+
+#case if no diagnoses made within hospital stay 
+if (length(df_filtered) == 0) {
+    print("No hospital admissions")
+} else {
+    #Select columns needed in final table
+    df_selected <- select(df_filtered,event_id.x,hospital_no,diag_local_code,Duration)
+    #Add a 'seen' column 
+    df_selected["Seen"] <- 1
+    df_selected_tibble <- as_tibble(rowid_to_column(df_selected,var = "rowid"))
+    
+    #Removes duplicates of diagnoses for same hospital stay 
+    df_selected <- df_selected %>% group_by(event_id.x,diag_local_code) %>% filter(row_number() == 1)
+
+    #Spread data
+    df_features <- df_selected %>%
+        spread(diag_local_code,Seen,fill = 0)
+        
+    
+}   
+
+#filter out stays that are less than 2 days (remove bias of pts who've come in for elective and had to be admitted as an in patient)
+df_features <- df_features %>%
+    filter(as.numeric(Duration)>=2)
+    
+#number of distinct diagnoses per patient to use as a feature in the model
+df_group <- group_by(df_dia,hospital_no,diag_local_code) %>% filter(row_number() == 1)
+df_group <- group_by(df_group,hospital_no) %>%
+    summarise (
+    n = n()
+    )
+df_features <- df_features %>% left_join(df_group,by = "hospital_no")
+
+#Adding up number of diagnoses in that hospital stay 
+df_features["diagnoses_no"] <- rowSums(df_features[-1:-3])
+
+#### Adding age and sex as features #####
+
+df_age_sex <- df_had %>% left_join(df_demo,by = "hospital_no")
+#Encoding sex as either a 1 or 0 
+df_age_sex$sex[df_age_sex$sex == "F"] <- 1
+df_age_sex$sex[df_age_sex$sex == "M"] <- 0
+df_age_sex$sex <- as.numeric(df_age_sex$sex)
+#Adding age in years 
+df_age_sex["Age"] <- NA
+df_age_sex["Age"] <- as.numeric(as.difftime(as.Date(df_age_sex$start_datetime) - df_age_sex$birth_date),units = "days")
+df_age_sex$Age <- df_age_sex$Age/365.25
+#Joining to features table 
+df_age_sex <- df_age_sex %>%
+    select(one_of(c("hospital_no","birth_date","start_datetime","event_id","sex","Age","deceased_flag")))
+names(df_age_sex)[names(df_age_sex) == "event_id"] <- "event_id.x"
+df_features <- df_features %>% left_join(df_age_sex, by = "event_id.x")
+
+#Remove patients older than 18 
+df_features <- df_features %>%
+    filter(Age <= 18)
+
+#Turn negative ages to 0 
+df_features$Age[df_features$Age<0] <- 0
+
+#Remove patients who died 
+df_features <- df_features %>%
+    filter(deceased_flag == F)
+
+#####Adding number of lab results as a feature 
+
+df_lab_counts <- xap.read_table('labs_first_24_hours')
+#Change event id to event id.x
+names(df_lab_counts)[names(df_lab_counts) == "event_id"] <- "event_id.x"
+#Join to features
+df_features <- df_features %>% left_join(df_lab_counts, by = "event_id.x")
+#Replacing missing n_labs values 
+df_features$n_labs <- replace_na(df_features$n_labs,0)
+
+#Adding number of previous hospital stays 
+df_history <- df_features %>% group_by(hospital_no.x) %>% mutate(previous = row_number()) 
+df_history$previous <- (df_history$previous - 1)
+df_history <- df_history %>% select(one_of(c("event_id.x","previous")))
+df_features <- df_features %>% left_join(df_history,by = "event_id.x")
+
+
+#######ADDING SPECIFIC LAB RESULTS #############
+
+
+df_creatinine <- df_lab_tests %>%
+    filter(test_name == "Creatinine") %>%
+    select(one_of(c("event_id", "mean")))
+names(df_creatinine)[names(df_creatinine) == "event_id"] <- "event_id.x"
+names(df_creatinine)[names(df_creatinine) == "mean"] <- "creatinine"
+df_features <- df_features %>% left_join(df_creatinine, by = "event_id.x")
+
+
+df_creatinine_sd <- df_lab_tests %>%
+    filter(test_name == "Creatinine") %>%
+    select(one_of(c("event_id", "sd")))
+df_creatinine_sd$sd[is.na(df_creatinine_sd$sd)] <- mean(df_creatinine_sd$sd,na.rm = TRUE)
+names(df_creatinine_sd)[names(df_creatinine_sd) == "event_id"] <- "event_id.x"
+names(df_creatinine_sd)[names(df_creatinine_sd) == "sd"] <- "creatinine sd"
+df_features <- df_features %>% left_join(df_creatinine_sd, by = "event_id.x")
+
+
+df_neutrophils <- df_lab_tests %>%
+    filter(test_name == "Neutrophils.") %>%
+    select(one_of(c("event_id","mean"))) 
+names(df_neutrophils)[names(df_neutrophils) == "event_id"] <- "event_id.x"
+names(df_neutrophils)[names(df_neutrophils) == "mean"] <- "neutrophils"
+df_features <- df_features %>% left_join(df_neutrophils, by = "event_id.x")
+
+df_neutrophils_sd <- df_lab_tests %>%
+    filter(test_name == "Neutrophils.") %>%
+    select(one_of(c("event_id", "sd")))
+df_neutrophils_sd$sd[is.na(df_neutrophils_sd$sd)] <- mean(df_neutrophils_sd$sd,na.rm = TRUE)
+names(df_neutrophils_sd)[names(df_neutrophils_sd) == "event_id"] <- "event_id.x"
+names(df_neutrophils_sd)[names(df_neutrophils_sd) == "sd"] <- "neutrophils sd"
+df_features <- df_features %>% left_join(df_neutrophils_sd, by = "event_id.x")
+
+df_rbc <- df_lab_tests %>%
+    filter(test_name == "Red Blood Cell Count") %>%
+    select(one_of(c("event_id","mean"))) 
+names(df_rbc)[names(df_rbc) == "event_id"] <- "event_id.x"
+names(df_rbc)[names(df_rbc) == "mean"] <- "rbc"
+df_features <- df_features %>% left_join(df_rbc, by = "event_id.x")
+
+df_rbc_sd <- df_lab_tests %>%
+    filter(test_name == "Red Blood Cell Count") %>%
+    select(one_of(c("event_id", "sd")))
+df_rbc_sd$sd[is.na(df_rbc_sd$sd)] <- mean(df_rbc_sd$sd,na.rm = TRUE)
+names(df_rbc_sd)[names(df_rbc_sd) == "event_id"] <- "event_id.x"
+names(df_rbc_sd)[names(df_rbc_sd) == "sd"] <- "rbc sd"
+df_features <- df_features %>% left_join(df_rbc_sd, by = "event_id.x")
+
+df_sodium <- df_lab_tests %>%
+    filter(test_name == "Sodium.") %>%
+    select(one_of(c("event_id","mean"))) 
+names(df_sodium)[names(df_sodium) == "event_id"] <- "event_id.x"
+names(df_sodium)[names(df_sodium) == "mean"] <- "sodium"
+df_features <- df_features %>% left_join(df_sodium, by = "event_id.x")
+
+df_sodium_sd <- df_lab_tests %>%
+    filter(test_name == "Sodium.") %>%
+    select(one_of(c("event_id", "sd")))
+df_sodium_sd$sd[is.na(df_sodium_sd$sd)] <- mean(df_sodium_sd$sd,na.rm = TRUE)
+names(df_sodium_sd)[names(df_sodium_sd) == "event_id"] <- "event_id.x"
+names(df_sodium_sd)[names(df_sodium_sd) == "sd"] <- "sodium sd"
+df_features <- df_features %>% left_join(df_sodium_sd, by = "event_id.x")
+
+df_urea <- df_lab_tests %>%
+    filter(test_name == "Urea") %>%
+    select(one_of(c("event_id","mean"))) 
+names(df_urea)[names(df_urea) == "event_id"] <- "event_id.x"
+names(df_urea)[names(df_urea) == "mean"] <- "urea"
+df_features <- df_features %>% left_join(df_urea, by = "event_id.x")
+
+
+df_urea_sd <- df_lab_tests %>%
+    filter(test_name == "Urea") %>%
+    select(one_of(c("event_id", "sd")))
+df_urea_sd$sd[is.na(df_urea_sd$sd)] <- mean(df_urea_sd$sd,na.rm = TRUE)
+names(df_urea_sd)[names(df_urea_sd) == "event_id"] <- "event_id.x"
+names(df_urea_sd)[names(df_urea_sd) == "sd"] <- "urea sd"
+df_features <- df_features %>% left_join(df_urea_sd, by = "event_id.x")
+
+#Selecting columns wanted in final table 
+df_features <- df_features %>%
+    select(one_of(c(
+    "event_id.x",
+    "Duration","n","diagnoses_no","sex","Age","n_labs","previous",
+    "creatinine",
+    "creatinine sd",
+    "neutrophils",
+    "neutrophils sd",
+    "rbc",
+    "rbc sd",
+    "sodium",
+    "sodium sd",
+    "urea",
+    "urea sd",
+    "K219",
+    "Z876",
+    "Z931",
+    "Z958",
+    "C910",
+    "R628",
+    "G473",
+    "Q250",
+    "M357",
+    "J984",
+    "Z843",
+    "R633",
+    "R11X",
+    "D70X",
+    "R509",
+    "R13X",
+    "I159",
+    "Z930",
+    "Z948",
+    "R068",
+    "R568",
+    "R629",
+    "Z924",
+    "N390",
+    "T827",
+    "Z223",
+    "K529",
+    "K904",
+    "D696",
+    "I340",
+    "E835")))
+
+#Creating patient list of patients used in final features table
+ptlist <- df_features %>%
+    select("hospital_no.x.x") %>%
+    distinct()
+ptlist <- ptlist$hospital_no.x.x
+    
+df <- as_tibble(df_features)
+ptlist <- as_tibble(ptlist)
+
+# # Write out dataframes
+xap.db.writeframe(df, 'my_features')
+xap.db.writeframe(ptlist, "Patient List")
+
