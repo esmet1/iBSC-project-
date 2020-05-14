@@ -1,4 +1,6 @@
-# library(dbplyr)
+# Majority of this script was written by Dr William Bryant 
+
+#library(dbplyr)
 
 
 # ### Get relevant lab results
