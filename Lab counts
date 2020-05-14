@@ -1,0 +1,70 @@
+#Script written by Dr William Bryant
+library(dbplyr)
+
+df_had <- as_tibble(xap.read_table('hospital_admissions'))
+
+# Filter for ease of development
+df_had <- df_had %>%
+    rename_all(
+        funs(
+            stringr::str_replace(.,"rdv_gos_hospital_admissions_","")
+            )
+        )
+
+# Add duration in days
+df_had <- df_had %>%
+    mutate(Duration = as.numeric(as.difftime(end_datetime - start_datetime))) %>%
+    mutate(Duration = Duration/(60*24))
+    
+# Filter by minimum 2 days duration
+df_had <- df_had %>% filter(Duration >= 2)
+    
+# Get relevant hospital numbers
+mrn_list <- df_had %>%
+    select(hospital_no) %>%
+    distinct()
+mrn_list <- mrn_list$hospital_no
+
+print("Loading LRE data ...")
+# Get lab results for those patients
+tbl_lre <- tbl(xap.conn, "lab_results")
+df_lre <- tbl_lre %>%
+    # filter(rdv_gos_lab_results_hospital_no %in% mrn_list) %>%
+    distinct(
+        rdv_gos_lab_results_hospital_no,
+        rdv_gos_lab_results_lab_no,
+        rdv_gos_lab_results_collected) %>%
+    # show_query()
+    collect()
+ 
+df_lre <- df_lre %>%
+    rename_all(
+        funs(
+            stringr::str_replace(.,"rdv_gos_lab_results_","")
+            )
+        )
+        
+print('Joining LRE to HAD ...')
+# Join tests to admissions
+df_had_tests <- df_had %>%
+    left_join(df_lre, by=c('hospital_no'))
+
+print('Filtering by collected datetime ...')
+# filter by collected within admission
+df_had_tests <- df_had_tests %>%
+    filter(collected %within% interval(start_datetime, end_datetime))
+
+print('Calculating rate of lab tests ...')
+# Assign tests to 24 hour periods from admission    
+df_had_tests <- df_had_tests %>%
+    mutate(time_to_test = as.numeric(interval(start_datetime, collected))/(24*3600)) %>% # fractions of 24 hours
+    mutate(day_of_test = as.integer(ceiling(time_to_test)))
+    
+# Count lab tests within 24 hours of admission
+df_lab_counts <- df_had_tests %>%
+    filter(day_of_test==1) %>%
+    group_by(hospital_no, start_datetime, event_id) %>%
+    summarise(n_labs = n())
+    
+df_lab_counts <- as_tibble(df_lab_counts)
+xap.db.writeframe(df_lab_counts,"Lab counts")
