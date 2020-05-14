@@ -1,0 +1,63 @@
+# Read tables into dataframe
+pred <- xap.read_table('predictions')
+test <- xap.read_table('test')
+
+#Plotting histogram of errors 
+diff <- test$Duration - pred
+error_plot <- ggplot(data.frame(diff), aes(x = df))+
+    geom_histogram(bins = 20,color = "black", fill = "orange") +
+    scale_x_continuous(limits = c(-100,100)) + 
+    xlab("Difference between predicted and true values (days)")
+error_plot
+
+#Plotting histogram of predicted LOS 
+pred_plot <- ggplot(data.frame(pred),aes(x=df)) +
+    geom_histogram(binwidth = 2,color="black", fill="lightblue") +
+    scale_x_continuous(limits = c(0, 100)) +
+    xlab("Length of stay (days)")
+pred_plot
+
+Plotting histogram of test dataset LOS
+plot_test <- ggplot(test,aes(x = as.numeric(Duration))) + 
+    geom_histogram(binwidth = 2,color="black", fill="lightblue") +
+    scale_x_continuous(limits = c(0, 100)) +
+    scale_y_continuous(limits = c(0,2000)) +
+    xlab("Length of stay (days)") + 
+    ylab("Number of patients")
+plot_test
+
+#Plotting actual vs predictions (scatter plot)
+plot2 <- ggplot() + 
+    geom_point(aes(x = test$Duration,y = data.frame(pred)$df),color = "cyan") +
+    scale_x_log10() +
+    scale_y_log10() + 
+    geom_abline(color = "red") + 
+    xlab("Test dataset value (log scale)") + 
+    ylab("Predicted value (log scale)")
+print(plot2) 
+
+
+#Getting mode of predictions 
+getmode <- function(v) {
+    uniqv <- unique(v)
+    uniqv[which.max(tabulate(match(v,uniqv)))]
+}
+
+#Viewing patients along horizontal mode of scatter plot 
+mode <- getmode(data.frame(pred)$df)
+indexes <- which(pred$df == mode)
+mode_pts <- test[c(indexes),]
+
+#Viewing patients along vertical mode of scatter plot 
+vertical_mode <- getmode(test$Duration)
+v_indexes <- which(test$Duration == vertical_mode)
+v_mode_pts <- test[c(v_indexes),]
+
+
+#graph of rmse with increasing diagnoses
+rmse_train <- data.frame("n_diagnoses" = c(5,15,25,35,45,50,55,65,75,85,95,100),"rmse" =c(16.77,16.14,15.93,15.34,16.01,15.49,15.4,15.22,15.4,15.06,16.32,15.13) )
+rmse_test<- data.frame("n_diagnoses" = c(5,15,25,35,45,50,55,65,75,85,95,100),"rmse" = c(23.74,23.26,23.2,23.06,23.81,23.7,22.93,22.67,23.36,22.67,23.53,23.71))
+rmse_plt <- ggplot() + geom_line(data = rmse_train,aes(x = n_diagnoses, y = rmse, color = "black"))
+rmse_plt <- rmse_plt + geom_line(data = rmse_test,aes(x = n_diagnoses,y = rmse,color = "red")) + 
+    scale_color_discrete(name = "", labels = c("Train RMSE", "Test RMSE"))
+rmse_plt
