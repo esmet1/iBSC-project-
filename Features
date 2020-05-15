@@ -232,16 +232,9 @@ df_features <- df_features %>%
     "I340",
     "E835")))
 
-#Creating patient list of patients used in final features table
-ptlist <- df_features %>%
-    select("hospital_no.x.x") %>%
-    distinct()
-ptlist <- ptlist$hospital_no.x.x
     
 df <- as_tibble(df_features)
-ptlist <- as_tibble(ptlist)
 
-# # Write out dataframes
+# # Write out dataframe
 xap.db.writeframe(df, 'my_features')
-xap.db.writeframe(ptlist, "Patient List")
 
