@@ -1,21 +1,12 @@
 # Read tables into dataframe
 pred <- xap.read_table('predictions')
 test <- xap.read_table('test')
-df_features <- xap.read_table('my_features')
-
-#Plotting histogram of LOS of features table
-plot_features <- ggplot(df_features,aes(x = as.numeric(Duration))) + 
-    geom_histogram(binwidth = 2,color="black", fill="lightblue") +
-    scale_x_continuous(limits = c(0, 100)) +
-    scale_y_continuous(limits = c(0,5000)) +
-    xlab("Length of stay (days)") + 
-    ylab("Number of patients")
-
 
 #Plotting histogram of errors 
 diff <- test$Duration - pred
 error_plot <- ggplot(data.frame(diff), aes(x = df))+
     geom_histogram(bins = 20,color = "black", fill = "orange") +
+    theme(axis.text=element_text(size=20),axis.title=element_text(size=14,face="bold")) + 
     scale_x_continuous(limits = c(-100,100)) + 
     xlab("Difference between predicted and true values (days)")
 error_plot
@@ -23,13 +14,16 @@ error_plot
 #Plotting histogram of predicted LOS 
 pred_plot <- ggplot(data.frame(pred),aes(x=df)) +
     geom_histogram(binwidth = 2,color="black", fill="lightblue") +
+    theme(axis.text=element_text(size=20),axis.title=element_text(size=14,face="bold")) + 
     scale_x_continuous(limits = c(0, 100)) +
-    xlab("Length of stay (days)")
+    xlab("Length of stay (days)") + 
+    ylab("Number of patients")
 pred_plot
 
-Plotting histogram of test dataset LOS
+#Plotting histogram of test dataset LOS
 plot_test <- ggplot(test,aes(x = as.numeric(Duration))) + 
     geom_histogram(binwidth = 2,color="black", fill="lightblue") +
+    theme(axis.text=element_text(size=20),axis.title=element_text(size=14,face="bold")) + 
     scale_x_continuous(limits = c(0, 100)) +
     scale_y_continuous(limits = c(0,2000)) +
     xlab("Length of stay (days)") + 
@@ -38,10 +32,11 @@ plot_test
 
 #Plotting actual vs predictions (scatter plot)
 plot2 <- ggplot() + 
-    geom_point(aes(x = test$Duration,y = data.frame(pred)$df),color = "cyan") +
+    geom_point(aes(x = test$Duration,y = data.frame(pred)$df)) +
     scale_x_log10() +
     scale_y_log10() + 
     geom_abline(color = "red") + 
+    theme(axis.text=element_text(size=20),axis.title=element_text(size=14,face="bold")) + 
     xlab("Test dataset value (log scale)") + 
     ylab("Predicted value (log scale)")
 print(plot2) 
@@ -69,5 +64,6 @@ rmse_train <- data.frame("n_diagnoses" = c(5,15,25,35,45,50,55,65,75,85,95,100),
 rmse_test<- data.frame("n_diagnoses" = c(5,15,25,35,45,50,55,65,75,85,95,100),"rmse" = c(23.74,23.26,23.2,23.06,23.81,23.7,22.93,22.67,23.36,22.67,23.53,23.71))
 rmse_plt <- ggplot() + geom_line(data = rmse_train,aes(x = n_diagnoses, y = rmse, color = "black"))
 rmse_plt <- rmse_plt + geom_line(data = rmse_test,aes(x = n_diagnoses,y = rmse,color = "red")) + 
-    scale_color_discrete(name = "", labels = c("Train RMSE", "Test RMSE"))
+    scale_color_discrete(name = "", labels = c("Train RMSE", "Test RMSE"))+
+    theme(axis.text=element_text(size=16),axis.title=element_text(size=14,face="bold")) 
 rmse_plt
