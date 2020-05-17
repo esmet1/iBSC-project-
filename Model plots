@@ -1,6 +1,7 @@
 # Read tables into dataframe
 pred <- xap.read_table('predictions')
 test <- xap.read_table('test')
+df_features <- xap.read_table('my_features')
 
 #Plotting histogram of errors 
 diff <- test$Duration - pred
@@ -10,6 +11,15 @@ error_plot <- ggplot(data.frame(diff), aes(x = df))+
     scale_x_continuous(limits = c(-100,100)) + 
     xlab("Difference between predicted and true values (days)")
 error_plot
+
+plot_features <- ggplot(df_features,aes(x = as.numeric(Duration))) + 
+    geom_histogram(binwidth = 2,color="black", fill="lightblue") +
+    scale_x_continuous(limits = c(0, 100)) +
+    scale_y_continuous(limits = c(0,5000)) +
+    theme(axis.text=element_text(size=16),axis.title=element_text(size=14,face="bold")) +
+    xlab("Length of stay (days)") + 
+    ylab("Number of patients")
+plot_features
 
 #Plotting histogram of predicted LOS 
 pred_plot <- ggplot(data.frame(pred),aes(x=df)) +
